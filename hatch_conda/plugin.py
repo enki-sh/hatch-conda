@@ -11,6 +11,7 @@ from types import FrameType
 from typing import Callable
 
 import pexpect
+from hatch.env.utils import add_verbosity_flag
 from hatch.env.plugin.interface import EnvironmentInterface
 from hatch.utils.env import PythonInfo
 
@@ -26,7 +27,11 @@ class ShellManager:
         self.spawn_linux_shell(path or "zsh", args or ["-i"], cmdl)
 
     def spawn_linux_shell(
-        self, path: str, args: list[str] | None = None, cmdl: str = "", callback: Callable | None = None
+        self,
+        path: str,
+        args: list[str] | None = None,
+        cmdl: str = "",
+        callback: Callable | None = None,
     ) -> None:
         columns, lines = shutil.get_terminal_size()
         terminal = pexpect.spawn(path, args=args, dimensions=(lines, columns))
@@ -58,9 +63,12 @@ class CondaEnvironment(EnvironmentInterface):
         self._config_conda_forge = None
         self._config_environment_file = None
         self._config_prefix = None
+        self._config_installer = None
         self.__python_version = None
 
-        self.conda_env_name = f"{self.metadata.core.name}_{self.name}_{self.python_version}"
+        self.conda_env_name = (
+            f"{self.metadata.core.name}_{self.name}_{self.python_version}"
+        )
         self.project_path = "."
 
         self.shells = ShellManager(self)
@@ -72,10 +80,11 @@ class CondaEnvironment(EnvironmentInterface):
             "conda-forge": bool,
             "environment-file": str,
             "prefix": (str, type(None)),
+            "installer": str,
         }
 
     def _config_value(self, field_name, default, valid=None):
-        class_name = f'_config_{field_name.replace("-", "_")}'
+        class_name = f"_config_{field_name.replace('-', '_')}"
         if self.__dict__[class_name] is None:
             value = self.config.get(field_name, default)
             if not isinstance(value, self.get_option_types()[field_name]):
@@ -84,7 +93,9 @@ class CondaEnvironment(EnvironmentInterface):
                     + "`{self.get_option_types()[field_name]}`"
                 )
             if valid is not None and value not in valid:
-                raise ValueError(f"Field `tool.hatch.envs.{self.name}.{field_name}` must be any of [{valid}] values.")
+                raise ValueError(
+                    f"Field `tool.hatch.envs.{self.name}.{field_name}` must be any of [{valid}] values."
+                )
             self.__dict__[class_name] = value
         return self.__dict__[class_name]
 
@@ -105,6 +116,10 @@ class CondaEnvironment(EnvironmentInterface):
         return self._config_value("environment-file", "")
 
     @property
+    def installer(self):
+        return self._config_value("installer", "pip", ["pip", "uv"])
+
+    @property
     def python_version(self):
         if self.__python_version is None:
             python_version = self.config.get("python", "")
@@ -122,20 +137,27 @@ class CondaEnvironment(EnvironmentInterface):
             return self.config_prefix
 
         if self.config_command == "micromamba":
-            output = self.platform.check_command_output([self.config_command, "info", "--name", name])
+            output = self.platform.check_command_output([
+                self.config_command,
+                "info",
+                "--name",
+                name,
+            ])
 
             match_env_location = r"env location : ([\S]*)\n"
             return re.findall(match_env_location, output)[0]
 
         else:
-            output = self.platform.check_command_output([self.config_command, "env", "list"])
-            env_names, env_paths = zip(
-                *[
-                    (line.split(" ")[0], line.split(" ")[-1])
-                    for line in output.splitlines()
-                    if len(line.split(" ")[0]) > 1
-                ]
-            )
+            output = self.platform.check_command_output([
+                self.config_command,
+                "env",
+                "list",
+            ])
+            env_names, env_paths = zip(*[
+                (line.split(" ")[0], line.split(" ")[-1])
+                for line in output.splitlines()
+                if len(line.split(" ")[0]) > 1
+            ])
             if name not in env_names:
                 return None
             return env_paths[env_names.index(name)]
@@ -148,14 +170,17 @@ class CondaEnvironment(EnvironmentInterface):
             command = [self.config_command, "create", "-y"]
             if self.config_conda_forge:
                 command += ["-c", "conda-forge", "--no-channel-priority"]
-            command += [
-                f"python={self.python_version}",
-                "pip",
-            ]
+            command += [f"python={self.python_version}", self.installer]
         elif self.config_command == "micromamba":
             command = ["micromamba", "create", "-y", "--file", self.environment_file]
         else:
-            command = [self.config_command, "env", "create", "--file", self.environment_file]
+            command = [
+                self.config_command,
+                "env",
+                "create",
+                "--file",
+                self.environment_file,
+            ]
         if self.config_prefix is not None:
             command += ["--prefix", self.config_prefix]
         else:
@@ -196,18 +221,35 @@ class CondaEnvironment(EnvironmentInterface):
         return [*head, *command]
 
     def construct_pip_install_command(self, *args, **kwargs):
-        return self.construct_conda_run_command(super().construct_pip_install_command(*args, **kwargs))
+        if self.installer == "uv":
+            command = ["uv", "pip", "install"]
+            command.extend(*args)
+        else:
+            command = super().construct_pip_install_command(*args, **kwargs)
+
+        cmd = self.construct_conda_run_command(command)
+        print(command)
+        print(cmd)
+
+        return cmd
 
     def install_project(self):
         self.apply_env_vars()
         with self:
-            self.platform.check_command(self.construct_pip_install_command([self.apply_features(self.project_path)]))
+            self.platform.check_command(
+                self.construct_pip_install_command([
+                    self.apply_features(self.project_path)
+                ])
+            )
 
     def install_project_dev_mode(self):
         self.apply_env_vars()
         with self:
             self.platform.check_command(
-                self.construct_pip_install_command(["--editable", self.apply_features(self.project_path)])
+                self.construct_pip_install_command([
+                    "--editable",
+                    self.apply_features(self.project_path),
+                ])
             )
 
     def dependencies_in_sync(self):
@@ -220,13 +262,17 @@ class CondaEnvironment(EnvironmentInterface):
         python_info = PythonInfo(self.platform)
         with self:
             return dependencies_in_sync(
-                self.dependencies_complex, sys_path=python_info.sys_path, environment=python_info.environment
+                self.dependencies_complex,
+                sys_path=python_info.sys_path,
+                environment=python_info.environment,
             )
 
     def sync_dependencies(self):
         self.apply_env_vars()
         with self:
-            self.platform.check_command(self.construct_pip_install_command(self.dependencies))
+            self.platform.check_command(
+                self.construct_pip_install_command(self.dependencies)
+            )
 
     @contextmanager
     def command_context(self):
@@ -237,11 +283,9 @@ class CondaEnvironment(EnvironmentInterface):
         self.apply_env_vars()
         return self.platform.run_command(
             " ".join(
-                self.construct_conda_run_command(
-                    [
-                        command,
-                    ]
-                )
+                self.construct_conda_run_command([
+                    command,
+                ])
             )
         )
 
@@ -266,5 +310,15 @@ class CondaEnvironment(EnvironmentInterface):
                     value_fixed = value_fixed.replace("%", "%%%%%%%%")
                 env_vars.append(f"{env_var}={value_fixed}")
             self.platform.check_command(
-                ["conda", "env", "config", "vars", "set", "-n", self.conda_env_name, "--"] + env_vars
+                [
+                    "conda",
+                    "env",
+                    "config",
+                    "vars",
+                    "set",
+                    "-n",
+                    self.conda_env_name,
+                    "--",
+                ]
+                + env_vars
             )
