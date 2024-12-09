@@ -101,7 +101,10 @@ class CondaEnvironment(EnvironmentInterface):
 
     @property
     def config_prefix(self):
-        return self._config_value("prefix", None)
+        prefix = self._config_value("prefix", None)
+        if prefix is not None and not Path(prefix).is_absolute():
+            return str((self.root / prefix).resolve())
+        return prefix
 
     @property
     def environment_file(self):
