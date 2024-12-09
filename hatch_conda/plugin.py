@@ -12,6 +12,7 @@ from typing import Callable
 
 import pexpect
 from hatch.env.plugin.interface import EnvironmentInterface
+from hatch.env.utils import add_verbosity_flag
 from hatch.utils.env import PythonInfo
 
 
@@ -58,6 +59,7 @@ class CondaEnvironment(EnvironmentInterface):
         self._config_conda_forge = None
         self._config_environment_file = None
         self._config_prefix = None
+        self._config_installer = None
         self.__python_version = None
 
         self.conda_env_name = f"{self.metadata.core.name}_{self.name}_{self.python_version}"
@@ -72,6 +74,7 @@ class CondaEnvironment(EnvironmentInterface):
             "conda-forge": bool,
             "environment-file": str,
             "prefix": (str, type(None)),
+            "installer": str,
         }
 
     def _config_value(self, field_name, default, valid=None):
@@ -105,6 +108,10 @@ class CondaEnvironment(EnvironmentInterface):
         return self._config_value("environment-file", "")
 
     @property
+    def installer(self):
+        return self._config_value("installer", "pip", ["pip", "uv"])
+
+    @property
     def python_version(self):
         if self.__python_version is None:
             python_version = self.config.get("python", "")
@@ -116,6 +123,10 @@ class CondaEnvironment(EnvironmentInterface):
             self.__python_version = python_version
 
         return self.__python_version
+
+    @property
+    def python_path(self):
+        return Path(self.find()).resolve() / "bin" / "python"
 
     def _get_conda_env_path(self, name: str):
         if self.config_prefix is not None:
@@ -129,13 +140,9 @@ class CondaEnvironment(EnvironmentInterface):
 
         else:
             output = self.platform.check_command_output([self.config_command, "env", "list"])
-            env_names, env_paths = zip(
-                *[
-                    (line.split(" ")[0], line.split(" ")[-1])
-                    for line in output.splitlines()
-                    if len(line.split(" ")[0]) > 1
-                ]
-            )
+            env_names, env_paths = zip(*[
+                (line.split(" ")[0], line.split(" ")[-1]) for line in output.splitlines() if len(line.split(" ")[0]) > 1
+            ])
             if name not in env_names:
                 return None
             return env_paths[env_names.index(name)]
@@ -195,8 +202,21 @@ class CondaEnvironment(EnvironmentInterface):
 
         return [*head, *command]
 
-    def construct_pip_install_command(self, *args, **kwargs):
-        return self.construct_conda_run_command(super().construct_pip_install_command(*args, **kwargs))
+    def construct_pip_install_command(self, args):
+        if self.installer == "uv":
+            command = [
+                "uv",
+                "pip",
+                "install",
+                "--python",
+                self.python_path,
+            ]
+            add_verbosity_flag(command, self.verbosity, adjustment=-1)
+            command.extend(args)
+        else:
+            command = super().construct_pip_install_command(args)
+
+        return self.construct_conda_run_command(command)
 
     def install_project(self):
         self.apply_env_vars()
@@ -237,11 +257,9 @@ class CondaEnvironment(EnvironmentInterface):
         self.apply_env_vars()
         return self.platform.run_command(
             " ".join(
-                self.construct_conda_run_command(
-                    [
-                        command,
-                    ]
-                )
+                self.construct_conda_run_command([
+                    command,
+                ])
             )
         )
 

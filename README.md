@@ -96,6 +96,15 @@ prefix = .venv/
 
 Will create a conda environment in the `.venv/` folder. This is useful because a text editor might check for this location to use the virtual environment.
 
+### Dependency installer
+
+The python dependency installer can be set to either `pip` [default] or `uv`. Select the installer for the environment:
+
+```toml
+[envs.<ENV_NAME>]
+installer = "uv"
+```
+
 ## Notes
 
 - There must be a `conda`, `mamba`, or `micromamba` executable along your `PATH`.

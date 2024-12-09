@@ -49,6 +49,13 @@ conda = "hatch_conda.hooks"
 [tool.hatch.version]
 path = "hatch_conda/__about__.py"
 
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.format]
+docstring-code-line-length = 120
+quote-style = "preserve"
+
 [tool.mypy]
 disallow_untyped_defs = false
 follow_imports = "normal"
