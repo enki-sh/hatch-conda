@@ -129,6 +129,8 @@ class CondaEnvironment(EnvironmentInterface):
 
     @property
     def python_path(self):
+        if self.platform.windows:
+            return Path(self.find()).resolve() / "python.exe"
         return Path(self.find()).resolve() / "bin" / "python"
 
     def _get_conda_env_path(self, name: str):
